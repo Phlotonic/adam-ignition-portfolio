@@ -1,0 +1,77 @@
+---
+# =============================================================================
+# docker-compose.yml — Eclipse Mosquitto MQTT Broker
+# Project: Oil & Gas UNS / Sparkplug B
+#
+# Starts a single Eclipse Mosquitto 2.0 broker with:
+#   - Port 1883: standard MQTT (TCP)
+#   - Port 9001: MQTT over WebSocket (for browser-based clients and Perspective)
+#
+# Usage:
+#   docker compose up -d            # start in background
+#   docker compose logs -f mosquitto # tail logs
+#   docker compose down             # stop and remove containers
+#
+# Production note:
+#   This configuration uses anonymous access for development convenience.
+#   In production: enable TLS (port 8883), add password_file auth,
+#   and restrict allow_anonymous to false. See mosquitto.conf for details.
+# =============================================================================
+
+version: "3.9"
+
+services:
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mqtt-broker
+    restart: unless-stopped
+
+    ports:
+      # 1883: standard MQTT TCP — used by RTUs, Ignition MQTT Engine, paho-mqtt
+      - "1883:1883"
+      # 9001: MQTT over WebSocket — used by browser-based MQTT clients,
+      #        Perspective WebSocket bindings, and MQTT Explorer GUI tool
+      - "9001:9001"
+
+    volumes:
+      # mosquitto.conf: main broker configuration
+      # Mount as read-only (:ro) — the broker only reads config at startup
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+      # data: persistence storage for retained messages and QoS 1/2 queues
+      # Named volume ensures data survives container restarts
+      - mosquitto_data:/mosquitto/data
+
+      # log: broker logs (connection events, errors, published message counts)
+      - mosquitto_log:/mosquitto/log
+
+    healthcheck:
+      # Use mosquitto_sub to verify the broker is accepting connections.
+      # --quiet suppresses output; -C 1 exits after receiving 1 message;
+      # We subscribe to a system topic ($SYS/broker/version) that Mosquitto
+      # always publishes — this confirms the broker is fully started.
+      test: ["CMD", "mosquitto_sub", "-h", "localhost", "-p", "1883",
+             "-t", "$$SYS/broker/version", "-C", "1", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+    # Resource limits — appropriate for a development broker.
+    # A production broker serving 100+ RTUs would need more memory.
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+# =============================================================================
+# NAMED VOLUMES
+# Docker manages these volume directories; they persist across container
+# restarts and are not deleted by `docker compose down` (use --volumes to remove).
+# =============================================================================
+volumes:
+  mosquitto_data:
+    name: uns_mosquitto_data
+  mosquitto_log:
+    name: uns_mosquitto_log

@@ -1,0 +1,11 @@
+# requirements.txt — FastAPI Anomaly Agent
+# Pin major versions for reproducibility; allow patch updates.
+# Generated for Python 3.11.
+
+fastapi==0.111.*
+uvicorn[standard]==0.29.*
+paho-mqtt==2.0.*
+scikit-learn==1.4.*
+numpy==1.26.*
+asyncpg==0.29.*
+python-dotenv==1.0.*

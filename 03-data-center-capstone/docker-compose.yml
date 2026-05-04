@@ -1,0 +1,176 @@
+---
+# =============================================================================
+# docker-compose.yml — Data Center AI Capstone Full Stack
+#
+# Services:
+#   timescaledb    — PostgreSQL 15 + TimescaleDB extension (time-series DB)
+#   mosquitto      — Eclipse Mosquitto 2.0 MQTT broker
+#   anomaly-agent  — FastAPI anomaly detection service (built from ./Dockerfile)
+#
+# Start:  docker compose up -d
+# Logs:   docker compose logs -f
+# Stop:   docker compose down
+# Reset:  docker compose down --volumes  (WARNING: deletes all persisted data)
+# =============================================================================
+
+version: "3.9"
+
+# =============================================================================
+# SHARED NETWORK
+# All services communicate on a dedicated bridge network (datacenter_net).
+# Container-to-container communication uses service names as hostnames:
+#   timescaledb → hostname "timescaledb" on port 5432
+#   mosquitto   → hostname "mosquitto"   on ports 1883, 9001
+# =============================================================================
+networks:
+  datacenter_net:
+    name: datacenter_net
+    driver: bridge
+
+
+services:
+
+  # ===========================================================================
+  # TIMESCALEDB
+  # TimescaleDB is a PostgreSQL extension that adds:
+  #   - Hypertables: automatically partitioned by time into 'chunks'
+  #   - time_bucket(): arbitrary time interval aggregation function
+  #   - Continuous aggregates: incrementally refreshed materialized views
+  #   - Data retention policies: automatic chunk expiration
+  #
+  # Image: timescale/timescaledb:latest-pg15
+  #   Latest TimescaleDB build on PostgreSQL 15 (recommended for new deployments)
+  # ===========================================================================
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: timescaledb
+    restart: unless-stopped
+    networks:
+      - datacenter_net
+
+    ports:
+      # Expose port 5432 on host for direct psql access during development.
+      # In production, remove this port mapping and access only from anomaly-agent.
+      - "5432:5432"
+
+    environment:
+      POSTGRES_DB:       datacenter    # database name
+      POSTGRES_USER:     postgres      # superuser — change in production
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-changeme}"  # from .env or default
+
+    volumes:
+      # Persist PostgreSQL data files across container restarts
+      - timescaledb_data:/var/lib/postgresql/data
+      # Auto-run SQL files on first init (when data volume is empty)
+      # Place schema files here to auto-apply on first `docker compose up`
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+
+    healthcheck:
+      # pg_isready: checks if PostgreSQL is accepting connections.
+      # -U postgres: connect as the postgres superuser
+      # -d datacenter: test connection to the specific database
+      test: ["CMD-SHELL", "pg_isready -U postgres -d datacenter"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s  # TimescaleDB needs extra startup time for init
+
+  # ===========================================================================
+  # MOSQUITTO MQTT BROKER
+  # Same Mosquitto configuration as Project 2, reused here for consistency.
+  # The anomaly-agent subscribes to rack telemetry on this broker.
+  # ===========================================================================
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto
+    restart: unless-stopped
+    networks:
+      - datacenter_net
+
+    ports:
+      - "1883:1883"   # MQTT TCP
+      - "9001:9001"   # MQTT WebSocket
+
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-h", "localhost", "-p", "1883",
+             "-t", "$$SYS/broker/version", "-C", "1", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ===========================================================================
+  # FASTAPI ANOMALY AGENT
+  # Python microservice built from ./Dockerfile.
+  # Subscribes to MQTT telemetry, runs threshold + Isolation Forest detection,
+  # exposes REST endpoints as MCP tools for LLM operator interface.
+  # ===========================================================================
+  anomaly-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: anomaly-agent
+    restart: unless-stopped
+    networks:
+      - datacenter_net
+
+    ports:
+      # 8000: FastAPI REST API (accessed by Ignition HTTP client and LLM interface)
+      - "8000:8000"
+
+    environment:
+      # Database connection string for asyncpg
+      # Format: postgresql+asyncpg://{user}:{password}@{host}:{port}/{database}
+      DATABASE_URL: "postgresql+asyncpg://postgres:${DB_PASSWORD:-changeme}@timescaledb:5432/datacenter"
+
+      # MQTT broker — service name resolves on datacenter_net
+      MQTT_BROKER_HOST: "mosquitto"
+      MQTT_BROKER_PORT: "1883"
+
+      # MQTT topic pattern: wildcard '+' matches any single path segment
+      # This subscribes to all rack edge nodes under the DataCenter group
+      MQTT_TOPIC: "spBv1.0/DataCenter/NDATA/+"
+
+      # Anomaly detection parameters
+      ANOMALY_BUFFER_SIZE:      "100"  # circular buffer depth per rack
+      ANOMALY_IF_FIT_THRESHOLD: "50"   # samples before Isolation Forest fits
+      ANOMALY_IF_CONTAMINATION: "0.05" # expected fraction of anomalous samples
+
+    # Ensure dependencies are healthy before starting the agent
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+
+    healthcheck:
+      # FastAPI /health endpoint returns {"status": "ok"} when running
+      test: ["CMD", "wget", "--quiet", "--tries=1",
+             "--spider", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s  # FastAPI startup + MQTT connect time
+
+    deploy:
+      resources:
+        limits:
+          memory: 512m   # Isolation Forest model fitting can be memory-intensive
+          cpus: "1.0"
+
+
+# =============================================================================
+# NAMED VOLUMES
+# =============================================================================
+volumes:
+  timescaledb_data:
+    name: dc_timescaledb_data
+  mosquitto_data:
+    name: dc_mosquitto_data
+  mosquitto_log:
+    name: dc_mosquitto_log
