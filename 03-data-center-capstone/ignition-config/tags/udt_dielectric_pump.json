@@ -1,0 +1,34 @@
+{
+  "name": "Dielectric_Pump",
+  "tagType": "UdtType",
+  "parameters": {
+    "MqttEdgeNode": {
+      "dataType": "String",
+      "value": "Pump_A01"
+    }
+  },
+  "tags": [
+    {
+      "name": "FlowRate_LPM",
+      "tagType": "AtomicTag",
+      "valueSource": "reference",
+      "deriveExpression": "[MQTT Engine]Edge Nodes/DataCenter/NDATA/{MqttEdgeNode}/flow_rate_lpm",
+      "historyEnabled": true,
+      "historyProvider": "TimescaleDB"
+    },
+    {
+      "name": "Speed_Hz",
+      "tagType": "AtomicTag",
+      "valueSource": "reference",
+      "deriveExpression": "[MQTT Engine]Edge Nodes/DataCenter/NDATA/{MqttEdgeNode}/speed_hz",
+      "historyEnabled": true,
+      "historyProvider": "TimescaleDB"
+    },
+    {
+      "name": "State",
+      "tagType": "AtomicTag",
+      "valueSource": "reference",
+      "deriveExpression": "[MQTT Engine]Edge Nodes/DataCenter/NDATA/{MqttEdgeNode}/state"
+    }
+  ]
+}

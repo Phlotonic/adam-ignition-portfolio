@@ -1,0 +1,44 @@
+{
+  "name": "AI_Anomaly_Pipeline",
+  "description": "Routes Webhook POST events from the FastAPI anomaly agent to Alarm Journals and Tag Writes.",
+  "enabled": true,
+  "trigger": {
+    "type": "webhook",
+    "endpoint": "/api/v1/event-streams/anomalies",
+    "methods": ["POST"],
+    "authEnabled": true,
+    "securityLevels": ["System"]
+  },
+  "pipeline": [
+    {
+      "type": "json_parser",
+      "input": "{trigger.payload}",
+      "output": "parsed_anomaly"
+    },
+    {
+      "type": "condition",
+      "expression": "{parsed_anomaly.severity} == 'critical'",
+      "truePath": [
+        {
+          "type": "alarm_journal_record",
+          "journalProfile": "TimescaleDB_Journal",
+          "priority": "Critical",
+          "source": "concat('prov:default:/tag:DataCenter/Pods/', {parsed_anomaly.pod_id})",
+          "message": "{parsed_anomaly.method} detected: {parsed_anomaly.metric} = {parsed_anomaly.value}"
+        }
+      ],
+      "falsePath": [
+        {
+          "type": "log",
+          "level": "INFO",
+          "message": "Non-critical anomaly received for {parsed_anomaly.pod_id}"
+        }
+      ]
+    },
+    {
+      "type": "tag_write",
+      "paths": ["concat('[default]DataCenter/Pods/', {parsed_anomaly.pod_id}, '/AnomalyStatus')"],
+      "values": ["{parsed_anomaly.severity}"]
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "name": "Immersion_Tank",
+  "tagType": "UdtType",
+  "parameters": {
+    "MqttEdgeNode": {
+      "dataType": "String",
+      "value": "Pod_A01"
+    }
+  },
+  "tags": [
+    {
+      "name": "HeatFlux_W_cm2",
+      "tagType": "AtomicTag",
+      "valueSource": "reference",
+      "deriveExpression": "[MQTT Engine]Edge Nodes/DataCenter/NDATA/{MqttEdgeNode}/heat_flux_w_cm2",
+      "historyEnabled": true,
+      "historyProvider": "TimescaleDB",
+      "alarms": [
+        {
+          "name": "Critical Heat Flux Imminent",
+          "priority": "Critical",
+          "setpointA": 165.0,
+          "mode": "AboveSetpoint"
+        },
+        {
+          "name": "High Heat Flux Warning",
+          "priority": "High",
+          "setpointA": 150.0,
+          "mode": "AboveSetpoint"
+        }
+      ]
+    },
+    {
+      "name": "FluidTemp_C",
+      "tagType": "AtomicTag",
+      "valueSource": "reference",
+      "deriveExpression": "[MQTT Engine]Edge Nodes/DataCenter/NDATA/{MqttEdgeNode}/fluid_temp_c",
+      "historyEnabled": true,
+      "historyProvider": "TimescaleDB"
+    },
+    {
+      "name": "VaporPressure_kPa",
+      "tagType": "AtomicTag",
+      "valueSource": "reference",
+      "deriveExpression": "[MQTT Engine]Edge Nodes/DataCenter/NDATA/{MqttEdgeNode}/vapor_pressure_kpa",
+      "historyEnabled": true,
+      "historyProvider": "TimescaleDB"
+    },
+    {
+      "name": "AnomalyCount",
+      "tagType": "AtomicTag",
+      "valueSource": "memory",
+      "dataType": "Int4",
+      "value": 0
+    },
+    {
+      "name": "AnomalyStatus",
+      "tagType": "AtomicTag",
+      "valueSource": "memory",
+      "dataType": "String",
+      "value": "normal"
+    }
+  ]
+}

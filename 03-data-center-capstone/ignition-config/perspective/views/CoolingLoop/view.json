@@ -1,0 +1,145 @@
+{
+  "custom": {},
+  "params": {
+    "tankPath": "[default]DataCenter/Pods/Pod_A01"
+  },
+  "props": {
+    "defaultSize": {
+      "width": 1024,
+      "height": 768
+    }
+  },
+  "root": {
+    "meta": {
+      "name": "root"
+    },
+    "type": "ia.container.coord",
+    "children": [
+      {
+        "meta": {
+          "name": "ImmersionTank_SVG"
+        },
+        "type": "ia.shapes.svg",
+        "position": {
+          "x": 200,
+          "y": 150,
+          "width": 400,
+          "height": 500
+        },
+        "props": {
+          "elements": [
+            {
+              "type": "rect",
+              "name": "TankVessel",
+              "x": "0",
+              "y": "0",
+              "width": "400",
+              "height": "500",
+              "fill": "#2C3E50",
+              "stroke": "#BDC3C7",
+              "strokeWidth": 4,
+              "rx": "15"
+            },
+            {
+              "type": "rect",
+              "name": "DielectricFluid",
+              "x": "20",
+              "y": "100",
+              "width": "360",
+              "height": "380",
+              "fill": "#3498DB"
+            },
+            {
+              "type": "path",
+              "name": "BoilingBubbles",
+              "d": "M 100 400 Q 120 380 100 360 T 100 320 M 200 450 Q 220 420 200 390 T 200 330 M 300 380 Q 320 350 300 320 T 300 260",
+              "stroke": "#FFFFFF",
+              "strokeWidth": 2,
+              "fill": "none"
+            }
+          ]
+        },
+        "propConfig": {
+          "props.elements[1].fill": {
+            "binding": {
+              "type": "tag",
+              "config": {
+                "dataPath": "{view.params.tankPath}/HeatFlux_W_cm2"
+              },
+              "transforms": [
+                {
+                  "type": "map",
+                  "fallback": "#3498DB",
+                  "inOutMap": [
+                    {
+                      "input": 150.0,
+                      "output": "#F39C12"
+                    },
+                    {
+                      "input": 165.0,
+                      "output": "#E74C3C"
+                    }
+                  ],
+                  "bounds": {
+                    "min": 0,
+                    "max": 200
+                  }
+                }
+              ]
+            }
+          },
+          "props.elements[2].strokeWidth": {
+            "binding": {
+              "type": "tag",
+              "config": {
+                "dataPath": "{view.params.tankPath}/HeatFlux_W_cm2"
+              },
+              "transforms": [
+                {
+                  "type": "expression",
+                  "expression": "if({value} > 150, 6, 2)"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "meta": {
+          "name": "HeatFluxLabel"
+        },
+        "type": "ia.display.label",
+        "position": {
+          "x": 200,
+          "y": 100,
+          "width": 400,
+          "height": 40
+        },
+        "props": {
+          "textStyle": {
+            "textAlign": "center",
+            "fontSize": 24,
+            "fontWeight": "bold",
+            "color": "#FFFFFF"
+          }
+        },
+        "propConfig": {
+          "props.text": {
+            "binding": {
+              "type": "tag",
+              "config": {
+                "dataPath": "{view.params.tankPath}/HeatFlux_W_cm2"
+              },
+              "transforms": [
+                {
+                  "type": "format",
+                  "format": "#,##0.00 'W/cm²'"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}
