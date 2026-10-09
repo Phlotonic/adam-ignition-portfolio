@@ -241,12 +241,20 @@ adam-ignition-portfolio/
 │   └── Designer_Tutorial_UNS.md               ← MQTT Engine setup, Sparkplug B tag population
 │
 └── 03-data-center-capstone/
-    ├── README.md                               ← architecture overview, MCP pattern rationale
-    ├── docker-compose.yml                      ← TimescaleDB + Mosquitto + FastAPI stack
+    ├── README.md                               ← architecture overview, HKUST-1 thermodynamics, MCP pattern
+    ├── docker-compose.yml                      ← TimescaleDB + Mosquitto + Anomaly Agent + Simulator
     ├── Dockerfile                              ← FastAPI anomaly agent container
-    ├── PUE_metrics.sql                         ← TimescaleDB hypertable, PUE aggregates, anomaly queries
-    ├── ai_anomaly_agent.py                     ← FastAPI + MQTT + Isolation Forest service
-    └── Designer_Tutorial_DataCenter.md         ← CRAC/rack UDTs, HTTP polling script, heat map dashboard
+    ├── Dockerfile.simulator                    ← Pod telemetry simulator container
+    ├── ai_anomaly_agent.py                     ← FastAPI + MQTT + asyncpg + Dual Isolation Forests
+    ├── mqtt_pod_simulator.py                   ← Multi-pod Sparkplug B / MQTT telemetry generator
+    ├── PUE_metrics.sql                         ← TimescaleDB hypertable & continuous aggregates (manual psql)
+    ├── init-scripts/
+    │   └── 01_ecosystem_telemetry.sql          ← Automated container database init script
+    ├── ignition-config/                        ← Ignition 8.3 Configuration-as-Code (Git versioned)
+    │   ├── tags/                               ← Reference tag UDTs (Immersion_Tank, Dielectric_Pump)
+    │   ├── event-streams/                      ← Anomaly Webhook event routing pipeline
+    │   └── perspective/views/CoolingLoop/      ← Native SVG Perspective view (string parameterized)
+    └── Designer_Tutorial_DataCenter.md         ← Ignition 8.3 & 8.1 setup, UDTs, Event Streams, and dashboards
 ```
 
 ---

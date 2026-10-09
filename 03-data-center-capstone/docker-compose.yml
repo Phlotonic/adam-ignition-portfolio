@@ -1,11 +1,12 @@
 ---
 # =============================================================================
-# docker-compose.yml — Data Center AI Capstone Full Stack
+# docker-compose.yml — Regenerative Data Center Capstone Full Stack
 #
 # Services:
 #   timescaledb    — PostgreSQL 15 + TimescaleDB extension (time-series DB)
 #   mosquitto      — Eclipse Mosquitto 2.0 MQTT broker
 #   anomaly-agent  — FastAPI anomaly detection service (built from ./Dockerfile)
+#   simulator      — Multi-pod telemetry simulator (built from ./Dockerfile.simulator)
 #
 # Start:  docker compose up -d
 # Logs:   docker compose logs -f
@@ -13,14 +14,8 @@
 # Reset:  docker compose down --volumes  (WARNING: deletes all persisted data)
 # =============================================================================
 
-version: "3.9"
-
 # =============================================================================
 # SHARED NETWORK
-# All services communicate on a dedicated bridge network (datacenter_net).
-# Container-to-container communication uses service names as hostnames:
-#   timescaledb → hostname "timescaledb" on port 5432
-#   mosquitto   → hostname "mosquitto"   on ports 1883, 9001
 # =============================================================================
 networks:
   datacenter_net:
@@ -37,9 +32,6 @@ services:
   #   - time_bucket(): arbitrary time interval aggregation function
   #   - Continuous aggregates: incrementally refreshed materialized views
   #   - Data retention policies: automatic chunk expiration
-  #
-  # Image: timescale/timescaledb:latest-pg15
-  #   Latest TimescaleDB build on PostgreSQL 15 (recommended for new deployments)
   # ===========================================================================
   timescaledb:
     image: timescale/timescaledb:latest-pg15
@@ -49,36 +41,27 @@ services:
       - datacenter_net
 
     ports:
-      # Expose port 5432 on host for direct psql access during development.
-      # In production, remove this port mapping and access only from anomaly-agent.
       - "5432:5432"
 
     environment:
-      POSTGRES_DB:       datacenter    # database name
-      POSTGRES_USER:     postgres      # superuser — change in production
-      POSTGRES_PASSWORD: "${DB_PASSWORD:-changeme}"  # from .env or default
+      POSTGRES_DB:       datacenter
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-changeme}"
 
     volumes:
-      # Persist PostgreSQL data files across container restarts
       - timescaledb_data:/var/lib/postgresql/data
       # Auto-run SQL files on first init (when data volume is empty)
-      # Place schema files here to auto-apply on first `docker compose up`
       - ./init-scripts:/docker-entrypoint-initdb.d:ro
 
     healthcheck:
-      # pg_isready: checks if PostgreSQL is accepting connections.
-      # -U postgres: connect as the postgres superuser
-      # -d datacenter: test connection to the specific database
       test: ["CMD-SHELL", "pg_isready -U postgres -d datacenter"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s  # TimescaleDB needs extra startup time for init
+      start_period: 15s
 
   # ===========================================================================
   # MOSQUITTO MQTT BROKER
-  # Same Mosquitto configuration as Project 2, reused here for consistency.
-  # The anomaly-agent subscribes to rack telemetry on this broker.
   # ===========================================================================
   mosquitto:
     image: eclipse-mosquitto:2.0
@@ -106,9 +89,6 @@ services:
 
   # ===========================================================================
   # FASTAPI ANOMALY AGENT
-  # Python microservice built from ./Dockerfile.
-  # Subscribes to MQTT telemetry, runs threshold + Isolation Forest detection,
-  # exposes REST endpoints as MCP tools for LLM operator interface.
   # ===========================================================================
   anomaly-agent:
     build:
@@ -120,28 +100,18 @@ services:
       - datacenter_net
 
     ports:
-      # 8000: FastAPI REST API (accessed by Ignition HTTP client and LLM interface)
       - "8000:8000"
 
     environment:
-      # Database connection string for asyncpg
-      # Format: postgresql+asyncpg://{user}:{password}@{host}:{port}/{database}
-      DATABASE_URL: "postgresql+asyncpg://postgres:${DB_PASSWORD:-changeme}@timescaledb:5432/datacenter"
-
-      # MQTT broker — service name resolves on datacenter_net
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:-changeme}@timescaledb:5432/datacenter"
       MQTT_BROKER_HOST: "mosquitto"
       MQTT_BROKER_PORT: "1883"
-
-      # MQTT topic pattern: wildcard '+' matches any single path segment
-      # This subscribes to all rack edge nodes under the DataCenter group
       MQTT_TOPIC: "spBv1.0/DataCenter/NDATA/+"
+      IGNITION_WEBHOOK_URL: "${IGNITION_WEBHOOK_URL:-}"
+      ANOMALY_BUFFER_SIZE:      "100"
+      ANOMALY_IF_FIT_THRESHOLD: "50"
+      ANOMALY_IF_CONTAMINATION: "0.05"
 
-      # Anomaly detection parameters
-      ANOMALY_BUFFER_SIZE:      "100"  # circular buffer depth per rack
-      ANOMALY_IF_FIT_THRESHOLD: "50"   # samples before Isolation Forest fits
-      ANOMALY_IF_CONTAMINATION: "0.05" # expected fraction of anomalous samples
-
-    # Ensure dependencies are healthy before starting the agent
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -149,19 +119,40 @@ services:
         condition: service_healthy
 
     healthcheck:
-      # FastAPI /health endpoint returns {"status": "ok"} when running
       test: ["CMD", "wget", "--quiet", "--tries=1",
              "--spider", "http://localhost:8000/health"]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 20s  # FastAPI startup + MQTT connect time
+      start_period: 20s
 
     deploy:
       resources:
         limits:
-          memory: 512m   # Isolation Forest model fitting can be memory-intensive
+          memory: 512m
           cpus: "1.0"
+
+  # ===========================================================================
+  # POD TELEMETRY SIMULATOR
+  # Publishes synthetic multi-pod thermodynamics and economic metrics to MQTT
+  # ===========================================================================
+  simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.simulator
+    container_name: pod-simulator
+    restart: unless-stopped
+    networks:
+      - datacenter_net
+
+    environment:
+      MQTT_BROKER_HOST: "mosquitto"
+      MQTT_BROKER_PORT: "1883"
+      PUBLISH_INTERVAL_SEC: "5.0"
+
+    depends_on:
+      mosquitto:
+        condition: service_healthy
 
 
 # =============================================================================

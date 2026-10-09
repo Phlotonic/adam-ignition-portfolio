@@ -1,21 +1,22 @@
 # Project 3 — Triple-Bottom-Line Regenerative Data Center Capstone
 
-**Domain:** Hyperscale Regenerative Ecosystems (Power, Compute, and Water Harvesting)
-**Stack:** FastAPI, TimescaleDB, scikit-learn, MQTT, Sparkplug B, Docker
+**Domain:** Hyperscale Regenerative Ecosystems (Power, Compute, Water Harvesting, & SCADA)  
+**Stack:** FastAPI, TimescaleDB, scikit-learn, Eclipse Mosquitto (MQTT / Sparkplug B), Docker Compose, Ignition 8.3 / 8.1
 
 ---
 
 ## 🌍 The Vision: Beyond Air Cooling
 Traditional data centers are environmental liabilities, consuming massive amounts of municipal water and electricity while outputting nothing but waste heat. 
 
-This capstone completely fundamentally re-engineers the data center into a **net-positive, structurally regenerative ecosystem**. 
+This capstone fundamentally re-engineers the data center into a **net-positive, structurally regenerative ecosystem**. 
 
-By applying Reticular Chemistry (Metal-Organic Frameworks or MOFs) directly to the server hardware, we overcome thermal limits while simultaneously harvesting water from the atmosphere and capturing carbon. 
+By applying Reticular Chemistry (Metal-Organic Frameworks or MOFs) directly to server hardware, we overcome thermal limits while simultaneously harvesting water from the atmosphere and dynamically rewarding network participants.
 
-### Core Milestones:
-1. **HKUST-1 Two-Phase Immersion Cooling:** We coat copper heat sinks with superhydrophilic HKUST-1 MOFs, pushing the Critical Heat Flux (CHF) limit to ~170 W/cm² to prevent vapor dry-out, enabling ultra-dense compute.
-2. **MOF-303 Atmospheric Water Generation (AWG):** We route the 60°C liquid waste heat through MOF-303 desiccants to thermally desorb harvested atmospheric water. The facility acts as a net-positive water producer.
-3. **Triple-Bottom-Line Economics:** The excess compute density generates profit, which is tracked and dynamically distributed to ecosystem participants, creating a network effect.
+### Core Architecture Highlights:
+1. **HKUST-1 Two-Phase Immersion Cooling:** Superhydrophilic HKUST-1 MOF films coated on copper meshes elevate the Critical Heat Flux (CHF) limit from ~55 W/cm² to ~170 W/cm², preventing vapor dry-out and enabling extreme compute densities.
+2. **MOF-303 Atmospheric Water Generation (AWG):** 60°C dielectric liquid waste heat thermally desorbs water vapor trapped by MOF-303 desiccants, producing pure distilled water without municipal hookups.
+3. **Triple-Bottom-Line Economics:** Compute value ($/FLOP) is tracked in real-time alongside physical thermal flux, with automated smart-contract payout tracking and SLA anomaly alerting.
+4. **Ignition 8.3 Configuration-as-Code:** SCADA configurations (UDTs, Event Streams, and Perspective Native SVG Views) are version-controlled as human-readable JSON files in `ignition-config/`.
 
 ---
 
@@ -25,107 +26,127 @@ By applying Reticular Chemistry (Metal-Organic Frameworks or MOFs) directly to t
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                        DATA CENTER EDGE LAYER                               │
 │                                                                              │
-│  Immersion Pod A01   Immersion Pod A02   MOF-303 AWG 1    Power / Plant     │
-│  [HeatFlux_W_cm2]    [HeatFlux_W_cm2]    [WaterHarvested] [TotalLoad_kW]    │
-│  [FluidTemp_C]       [FluidTemp_C]                                          │
+│  Immersion Pod A01   Immersion Pod A02   MOF-303 AWG 1    Dielectric Pump 1  │
+│  [HeatFlux_W_cm2]    [HeatFlux_W_cm2]    [WaterHarvested] [FlowRate_LPM]     │
+│  [FluidTemp_C]       [FluidTemp_C]       [DesorptionTemp] [Speed_Hz]         │
 │       │                    │                 │                │              │
-│       └──────┬─────────────┘                 └────────────────┘             │
-│              │  Sparkplug B MQTT edge nodes                                  │
-│              │  Topic: spBv1.0/DataCenter/NDATA/Pod_A01                     │
+│       └──────┬─────────────┘                 └────────────────┘              │
+│              │  Sparkplug B / MQTT Telemetry (5s interval)                   │
+│              │  Topic: spBv1.0/DataCenter/NDATA/{pod_id}                     │
 └──────────────┼───────────────────────────────────────────────────────────────┘
                │
                ▼ MQTT (port 1883)
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                     Eclipse Mosquitto MQTT Broker                            │
-│                     (Docker container)                                       │
+│                     (Docker container: mosquitto)                            │
 └──────────────┬───────────────────────────────────────────────────────────────┘
                │
-        ┌──────┴──────────────────────┐
-        │                             │
-        ▼                             ▼
-┌────────────────────┐   ┌──────────────────────────────────────────────────┐
-│  Ignition MQTT     │   │          FastAPI Triple-Bottom-Line Agent         │
-│  Engine module     │   │          (Python microservice, Docker)            │
-│                    │   │                                                    │
-│  Auto-creates tags │   │  ┌─────────────────────────────────────────────┐ │
-│  in Tag Browser    │   │  │ MQTT Subscriber (background thread)         │ │
-│  for all pods      │   │  │  - Circular buffer: 100 readings/pod        │ │
-│                    │   │  │  - Physics thresholds (CHF, Fluid Temp)     │ │
-│  HTTP polling via  │   │  │  - Economic SLAs (Unsettled balances)       │ │
-│  tag change script │   │  │  - Dual Isolation Forests (Physics + Econ)  │ │
-│  → writes JSON to  │   │  └──────────────────┬──────────────────────────┘ │
-│    memory tags     │   │                     │                             │
-│                    │   │  ┌──────────────────▼──────────────────────────┐ │
-│                    │   │  │ REST API (MCP Tools for LLM interface)       │ │
-│                    │   │  │  GET  /status          — facility overview   │ │
-│                    │   │  │  GET  /anomalies        — active alerts      │ │
-│                    │   │  │  POST /acknowledge/{id} — ack anomaly        │ │
-│                    │   │  └──────────────────┬──────────────────────────┘ │
-│                    │   │                     │                             │
-│                    │   │  ┌──────────────────▼──────────────────────────┐ │
-│                    │   │  │ TimescaleDB (ecosystem_telemetry hypertable) │ │
-│                    │   │  │  - Profit distribution ledgers               │ │
-│                    │   │  │  - Continuous aggregate: hourly yields       │ │
-│                    │   │  │  - Anomaly queries                           │ │
-│                    │   │  └──────────────────────────────────────────────┘ │
-│                    │   └──────────────────────────────────────────────────┘
-└────────────────────┘
+        ┌──────┴────────────────────────────────────────────────┐
+        │                                                       │
+        ▼                                                       ▼
+┌──────────────────────────────────┐   ┌───────────────────────────────────────────────┐
+│  Ignition 8.3 SCADA Gateway      │   │  FastAPI Triple-Bottom-Line Agent             │
+│  (Config-as-Code in Git)         │   │  (Python microservice: anomaly-agent)         │
+│                                  │   │                                               │
+│  1. Reference Tag UDTs           │   │  ┌──────────────────────────────────────────┐ │
+│     - Immersion_Tank             │   │  │ MQTT Subscriber (Background Thread)      │ │
+│     - Dielectric_Pump            │   │  │  - Circular buffer: 100 samples/pod      │ │
+│     - Decouples alarms/history   │   │  │  - Auto-reconnect with backoff           │ │
+│       from transient MQTT tags   │   │  └──────────────────┬───────────────────────┘ │
+│                                  │   │                     │                         │
+│  2. Event Streams Pipeline       │   │  ┌──────────────────▼───────────────────────┐ │
+│     - Ingests alerts via Webhook │   │  │ Ensemble Anomaly Engine                  │ │
+│     - Routes to TimescaleDB      │   │  │  - Thresholds: CHF > 165, SLA > $1000   │ │
+│       Alarm Journal              │   │  │  - Physical Isolation Forest (4D)        │ │
+│                                  │   │  │  - Economic Isolation Forest (2D)        │ │
+│  3. Perspective Native Graphics  │   │  └──────────────────┬───────────────────────┘ │
+│     - Native SVG shapes          │   │                     │                         │
+│     - String tagPath param       │   │  ┌──────────────────▼───────────────────────┐ │
+│     - Dynamic boiling animations │   │  │ Asyncpg TimescaleDB Ingest Worker        │ │
+│                                  │   │  │  - Non-blocking asyncio.Queue            │ │
+│                                  │   │  │  - Bulk writes to ecosystem_telemetry    │ │
+│                                  │   │  └──────────────────┬───────────────────────┘ │
+│                                  │   │                     │                         │
+│                                  │   │  ┌──────────────────▼───────────────────────┐ │
+│                                  │   │  │ REST API (MCP-Over-HTTP Tools)           │ │
+│                                  │   │  │  GET /health     GET /status             │ │
+│                                  │   │  │  GET /anomalies  POST /acknowledge       │ │
+│                                  │   │  └──────────────────────────────────────────┘ │
+└──────────────────────────────────┘   └───────────────────────┬───────────────────────┘
+                                                               │
+                                                               ▼
+                                       ┌───────────────────────────────────────────────┐
+                                       │ TimescaleDB (PostgreSQL 15 + Extension)       │
+                                       │  - Auto-provisioned via ./init-scripts/       │
+                                       │  - Hypertable: ecosystem_telemetry (1d chunk) │
+                                       │  - Continuous Aggregate: hourly yield         │
+                                       │  - Retention Policy: 90 days automatic prune  │
+                                       └───────────────────────────────────────────────┘
 ```
 
 ---
 
 ## 🧠 Ensemble Machine Learning: Dual Isolation Forests
 
-To accurately detect anomalies in a hybrid ecosystem, we must account for the **Temporal Impedance Mismatch**. 
-Mixing continuous thermodynamic physics (which occur in seconds) with discrete economic smart contracts (which settle in hours) into a single machine learning model ruins the clustering geometry of an Isolation Forest.
+To accurately detect anomalies in this hybrid ecosystem, we resolve the **Temporal Impedance Mismatch**:
+- **Thermodynamic Physics:** Continuous, microsecond-to-second boiling and fluid dynamics.
+- **Economic Settlements:** Discrete, step-wise blockchain / smart-contract settlement events occurring over hours.
 
-We solved this by running an **Ensemble Model**:
-1. **The Physical AI:** Ingests `[heat_flux_w_cm2, fluid_temp_c, vapor_pressure_kpa, water_harvested_liters]`. Exclusively monitors the physical health of the MOF and the HKUST-1 wick.
-2. **The Economic AI:** Ingests `[compute_yield_usd, unsettled_balance_usd]`. Exclusively monitors the health of the smart contract and the profit distribution.
+Feeding both into a single unsupervised model causes financial steps to drown out subtle physical degradation (such as MOF desiccant fouling). 
 
-If the physical AI says everything is normal, but the water harvesting drops, the AI detects the decoupling of the ecosystem (e.g., MOF-303 desiccant fouling). 
+We separate detection into two dedicated Isolation Forests:
+1. **Physical AI:** Features: `[heat_flux_w_cm2, fluid_temp_c, vapor_pressure_kpa, water_harvested_liters]`.
+2. **Economic AI:** Features: `[compute_yield_usd, unsettled_balance_usd]`.
 
 ---
 
-## 🔒 Why MCP-Over-HTTP Is Safer Than Direct LLM-to-PLC
+## 📁 Repository & Directory Layout
 
-This is the most important architectural principle when combining Generative AI with Operational Technology (OT).
-
-**The naive approach (dangerous):**
-```
-LLM → Modbus write → PLC → physical actuator
-```
-An LLM hallucinating a setpoint change could cause real equipment damage, specifically in highly volatile two-phase immersion tanks.
-
-**The MCP-over-HTTP pattern (safe):**
-```
-LLM → HTTP REST API → validated agent → read-only OT data
-                   ↘ POST /acknowledge → human-initiated, not autonomous
-```
-
-1. **Read-only by default.** The LLM can see all sensor data but cannot change setpoints.
-2. **Validated, typed responses.** Pydantic models ensure the LLM receives well-structured JSON, not raw register dumps.
+| Path | Purpose |
+|------|---------|
+| `docker-compose.yml` | Full 4-service stack: TimescaleDB, Mosquitto, Anomaly Agent, Simulator |
+| `Dockerfile` | Multi-stage production container for `ai_anomaly_agent.py` |
+| `Dockerfile.simulator` | Container for continuous multi-pod telemetry simulation |
+| `ai_anomaly_agent.py` | Complete FastAPI service with asyncpg ingest, dual ML models, and MCP tools |
+| `mqtt_pod_simulator.py` | Synthetic telemetry generator with simulated CHF and SLA failure modes |
+| `PUE_metrics.sql` | TimescaleDB hypertable, continuous aggregates, and retention policy (manual psql) |
+| `init-scripts/01_ecosystem_telemetry.sql` | Auto-executed SQL script for initial container database provisioning |
+| `requirements.txt` | Pinned Python dependencies (FastAPI, scikit-learn, asyncpg, paho-mqtt) |
+| `ignition-config/tags/` | Ignition 8.3 UDTs (`Immersion_Tank`, `Dielectric_Pump`) with Reference tags |
+| `ignition-config/event-streams/` | Ignition 8.3 Event Streams webhook anomaly ingestion pipeline |
+| `ignition-config/perspective/views/` | Ignition 8.3 Native SVG Perspective View with string path parameter |
+| `Designer_Tutorial_DataCenter.md` | Comprehensive step-by-step Ignition setup guide (8.3 native + 8.1 fallback) |
 
 ---
 
 ## 🚀 Quick Start
 
+### 1. Launch the Stack
 ```bash
-# Start the full stack
 docker compose up -d
-
-# Verify services
-docker compose ps
-
-# Run database schema
-docker exec -i timescaledb psql -U postgres -d datacenter < PUE_metrics.sql
-
-# Install Python dependencies (for local dev, outside Docker)
-pip install fastapi uvicorn paho-mqtt scikit-learn numpy asyncpg python-dotenv
-
-# Run the anomaly agent locally
-python ai_anomaly_agent.py
-
-# View API docs
-open http://localhost:8000/docs
 ```
+Docker Compose automatically brings up all four services:
+- `timescaledb`: Automatically mounts `./init-scripts/` and provisions the hypertable.
+- `mosquitto`: Starts the MQTT broker on ports 1883 and 9001.
+- `pod-simulator`: Begins broadcasting multi-pod telemetry every 5 seconds.
+- `anomaly-agent`: Ingests telemetry, fits Isolation Forests, writes to TimescaleDB, and exposes MCP endpoints.
+
+### 2. Verify Services
+```bash
+docker compose ps
+```
+
+### 3. Query Real-Time Telemetry and Anomalies
+```bash
+# Check service health
+curl http://localhost:8000/health
+
+# View complete facility status
+curl http://localhost:8000/status
+
+# View active unacknowledged anomalies
+curl http://localhost:8000/anomalies
+```
+
+### 4. Interactive OpenAPI Docs
+Open `http://localhost:8000/docs` in your browser to inspect and interact with the MCP tool endpoints.

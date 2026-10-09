@@ -1,70 +1,109 @@
 # Ignition Designer Tutorial — Regenerative Data Center Capstone
 
-**Ignition Version:** 8.1.x with MQTT Engine module
-**Estimated Time:** 60–90 minutes
+**Ignition Version:** 8.3 (Native SVG, Event Streams, Configuration-as-Code) with 8.1 Legacy Fallback  
+**Estimated Time:** 45–60 minutes
 
-This tutorial configures Ignition Designer for our Triple-Bottom-Line facility:
-1. Create the Immersion Pod UDT and MOF AWG Unit UDT.
-2. Write a tag change script that polls the FastAPI anomaly agent via HTTP.
-3. Build a Perspective heat map dashboard showing HKUST-1 heat fluxes.
-
----
-
-## Part 1 — Create the Immersion Pod UDT
-
-The Immersion Pod UDT represents a high-density, two-phase liquid cooled compute unit utilizing HKUST-1 MOF coatings.
-
-### 1.1 Open the UDT Editor
-
-1. Open Ignition Designer → **Tag Browser** (left panel)
-2. Right-click **User Defined Types** → **New Data Type**
-3. Name: `Immersion_Pod`
-4. Click **OK**
-
-### 1.2 Add Member Tags
-
-With `Immersion_Pod` selected, right-click → **New Tag** for each:
-
-| Tag Name | Tag Type | Data Type | Default | Notes |
-|----------|----------|-----------|---------|-------|
-| `HeatFlux_W_cm2` | OPC Tag | Float4 | 130.0 | Heat flux across the HKUST-1 wick (Limit: 170 W/cm²) |
-| `FluidTemp_C` | OPC Tag | Float4 | 55.0 | Bulk temperature of dielectric fluid |
-| `VaporPressure_kPa` | OPC Tag | Float4 | 101.3 | Pressure of the boiling fluid |
-| `UnsettledBalance_USD` | OPC Tag | Float4 | 0.0 | Accrued economic payout pending smart contract execution |
-| `AnomalyCount` | Memory Tag | Int4 | 0 | Count of active anomalies from FastAPI agent |
-| `AnomalyStatus` | Memory Tag | String | "normal" | "normal" / "warning" / "critical" |
-
-### 1.3 Create UDT Instances
-
-1. Create folder structure: `DataCenter/Pods`
-2. Create instances: `Pod_A01`, `Pod_A02`, `Pod_A03`.
-3. These OPC tags will receive values from our `mqtt_pod_simulator.py`.
+This tutorial configures the Ignition SCADA frontend for the **Triple-Bottom-Line Liquid-Cooled Data Center**:
+1. **Configuration-as-Code (Ignition 8.3):** Deploying Immersion Pod & Dielectric Pump UDTs using Reference tags.
+2. **Event Streams:** Ingesting real-time anomaly alerts from the FastAPI agent via Webhook.
+3. **Perspective Native Graphics:** Rendering dynamic two-phase boiling physics using native SVG drawing elements and string tag path parameterization.
+4. **Legacy 8.1 Fallback:** Gateway Timer Script polling pattern.
 
 ---
 
-## Part 2 — Create the MOF AWG UDT
+## Part 1 — Configuration-as-Code & Reference Tag Pattern (Ignition 8.3)
 
-We no longer use traditional CRAC (air conditioning) units. Instead, we route the waste heat into Atmospheric Water Generators (AWGs).
+In Ignition 8.3, configurations are stored directly in human-readable JSON files under the gateway's `data/config` filesystem, making them version-controllable via Git.
 
-### 2.1 Add Member Tags to `AWG_Unit` UDT
+All ready-to-deploy JSON definitions are pre-built in the `ignition-config/` directory:
 
-| Tag Name | Tag Type | Data Type | Default | Notes |
-|----------|----------|-----------|---------|-------|
-| `WaterHarvested_Liters` | OPC Tag | Float4 | 0.0 | Yield from the MOF-303 desiccant |
-| `DesorptionTemp_C` | OPC Tag | Float4 | 58.0 | Waste heat temperature driving the AWG |
-| `Status` | OPC Tag | Int4 | 0 | 0=Running, 1=Fouling, 2=Standby |
+```
+03-data-center-capstone/ignition-config/
+├── tags/
+│   ├── udt_immersion_tank.json      ← Immersion Pod UDT with Reference tags & CHF alarms
+│   └── udt_dielectric_pump.json     ← Coolant pump UDT with flow/speed tags
+├── event-streams/
+│   └── anomaly_pipeline.json       ← Event Streams webhook & alarm routing pipeline
+└── perspective/
+    └── views/
+        └── CoolingLoop/
+            └── view.json            ← Native SVG Perspective view with string parameterization
+```
+
+### 1.1 The Reference Tag Best Practice
+
+When using Cirrus Link MQTT Engine with Sparkplug B, telemetry metrics appear dynamically under `[MQTT Engine]Edge Nodes/DataCenter/...`. 
+
+> [!IMPORTANT]
+> **Why Reference Tags are required:**  
+> Configuring alarms or historian logging directly on auto-generated MQTT Engine tags is dangerous. If an edge node drops offline or the broker restarts, transient Sparkplug tags can be recreated, wiping out attached alarms.  
+> Our UDTs live safely in the standard `[default]` provider and use **Reference Tags** that point to `[MQTT Engine]`. Alarms and TimescaleDB history remain permanent and decoupled from network volatility.
+
+### 1.2 Deploying the UDTs
+
+In Ignition Designer:
+1. Navigate to **Tag Browser** → **User Defined Types**.
+2. Right-click → **Import Tags** (or copy `ignition-config/tags/*.json` into `data/config/tags`).
+3. Verify that `Immersion_Tank` and `Dielectric_Pump` are loaded.
+4. In `[default]DataCenter/Pods`, instantiate:
+   - `Pod_A01` (parameter `MqttEdgeNode` = `Pod_A01`)
+   - `Pod_A02` (parameter `MqttEdgeNode` = `Pod_A02`)
+   - `Pod_A03` (parameter `MqttEdgeNode` = `Pod_A03`)
 
 ---
 
-## Part 3 — Write the HTTP Polling Tag Change Script
+## Part 2 — Event Streams Anomaly Ingestion (Ignition 8.3)
 
-This script polls the FastAPI anomaly agent and writes the results into the pod UDT memory tags.
+Rather than polling an API with periodic scripts, Ignition 8.3 introduces **Event Streams** for event-driven data flow.
 
-1. In Gateway web UI: **Config** → **Events** → **Gateway Event Scripts** → **Timer**
-2. Name: `PollAnomalyAgent`
-3. Execution Rate: `60000` ms (60 seconds)
+### 2.1 The Event Streams Pipeline
 
-Enter this script:
+The pipeline defined in `ignition-config/event-streams/anomaly_pipeline.json` configures:
+1. **Trigger:** Webhook listening on `/api/v1/event-streams/anomalies` (POST).
+2. **Parser:** Unpacks the anomaly JSON payload (`pod_id`, `metric`, `value`, `severity`, `method`).
+3. **Router:**
+   - Critical anomalies (e.g. Critical Heat Flux > 165 W/cm² or SLA breach > $1,000) are routed directly into the `TimescaleDB_Journal` Alarm Journal.
+   - Writes the status directly to `[default]DataCenter/Pods/{pod_id}/AnomalyStatus`.
+
+### 2.2 Enabling the Pipeline
+
+1. Open Gateway Web UI → **Event Streams**.
+2. Import `anomaly_pipeline.json`.
+3. Set `IGNITION_WEBHOOK_URL=http://<ignition-host>:8088/api/v1/event-streams/anomalies` in the `anomaly-agent` environment to enable automated dispatch.
+
+---
+
+## Part 3 — Perspective Native SVG Graphic & Performance Optimization
+
+Modern Perspective dashboards in 8.3 leverage native SVG drawing elements (`ia.shapes.svg`), eliminating the need for heavy external image assets.
+
+### 3.1 String Parameterization Best Practice
+
+> [!TIP]
+> **Performance Architecture:**  
+> Never pass an entire UDT Object into a Perspective View as a parameter. Doing so forces the Gateway to serialize the entire object over WebSocket to the browser on every tick.  
+> The `CoolingLoop` view accepts a single string parameter: `tankPath` (e.g. `"[default]DataCenter/Pods/Pod_A01"`). All component properties use indirect bindings to `{view.params.tankPath}/...`, keeping WebSocket bandwidth minimal.
+
+### 3.2 Visualizing the Boiling Dynamics
+
+In `ignition-config/perspective/views/CoolingLoop/view.json`:
+- **Vessel:** SVG `rect` styled with metallic enclosure borders.
+- **Fluid Fill:** Bound to `{view.params.tankPath}/HeatFlux_W_cm2`:
+  - Normal nucleate boiling (< 150 W/cm²): `#3498DB` (Dielectric Blue)
+  - Approaching limit (150–165 W/cm²): `#F39C12` (Warning Amber)
+  - Dry-out / Critical Heat Flux (≥ 165 W/cm²): `#E74C3C` (Critical Red)
+- **Vapor Phase:** Dynamic SVG `path` with bubble stroke animation responsive to vapor generation rates.
+
+---
+
+## Part 4 — Legacy 8.1 Fallback (HTTP Polling Script)
+
+For systems running Ignition 8.1.x where Event Streams are unavailable, use this Gateway Timer Script fallback:
+
+1. In Gateway / Designer: **Project** → **Gateway Event Scripts** → **Timer**.
+2. **Name:** `PollAnomalyAgent`
+3. **Rate:** `10000` ms (10 seconds)
+4. Script:
 
 ```python
 ANOMALY_AGENT_URL = "http://localhost:8000/status"
@@ -76,51 +115,49 @@ def poll_anomaly_agent():
         response = client.get(
             url=ANOMALY_AGENT_URL,
             headers={"Accept": "application/json"},
-            connectTimeout=5,
-            readTimeout=10,
+            connectTimeout=4,
+            readTimeout=6,
         )
 
         if response.statusCode != 200:
             return
 
-        facility_data = system.util.jsonDecode(response.body)
-        pods = facility_data.get("pods", [])
+        data = system.util.jsonDecode(response.body)
+        pods = data.get("pods", [])
 
         for pod in pods:
             pod_id      = pod.get("pod_id", "")
             status      = pod.get("status", "normal")
             anomaly_cnt = len(pod.get("active_anomalies", []))
 
-            status_tag = "%s/%s/AnomalyStatus" % (TAG_BASE_PATH, pod_id)
-            count_tag  = "%s/%s/AnomalyCount"  % (TAG_BASE_PATH, pod_id)
-
             system.tag.writeBlocking(
-                [status_tag, count_tag],
-                [status,     anomaly_cnt]
+                ["%s/%s/AnomalyStatus" % (TAG_BASE_PATH, pod_id),
+                 "%s/%s/AnomalyCount"  % (TAG_BASE_PATH, pod_id)],
+                [status, anomaly_cnt]
             )
-            
     except Exception as e:
-        system.util.getLogger("AnomalyPoll").error("Failed: " + str(e))
+        system.util.getLogger("AnomalyPoll").warning("Polling failed: " + str(e))
 
 poll_anomaly_agent()
 ```
 
 ---
 
-## Part 4 — Build the Perspective Heat Flux Dashboard
+## Part 5 — End-to-End Quickstart
 
-Instead of a traditional air temperature heatmap, we visualize the boiling dynamics (Heat Flux).
-
-1. In Designer: New View → `dashboards/PodThermalHeatmap`
-2. Create a Template Repeater (`components/PodTile`) binding to the `HeatFlux_W_cm2` tag.
-3. Configure the color expression to highlight CHF risks:
-```
-if({view.params.heat_flux} >= 165, '#d32f2f',      // Critical dry-out: ≥ 165
-   if({view.params.heat_flux} >= 150, '#f57c00',   // Warning: 150–165
-      '#388e3c'))                                  // Normal nucleate boiling
-```
-
-## Quick Start
-1. Run `docker compose up -d`
-2. Start the simulator: `python mqtt_pod_simulator.py`
-3. Start the AI Agent: `python ai_anomaly_agent.py`
+1. **Launch the backend ecosystem:**
+   ```bash
+   docker compose up -d
+   ```
+2. **Verify running containers:**
+   ```bash
+   docker compose ps
+   ```
+   Containers: `timescaledb`, `mosquitto`, `anomaly-agent`, `pod-simulator`.
+3. **Inspect live MCP agent status:**
+   ```bash
+   curl http://localhost:8000/status
+   curl http://localhost:8000/health
+   ```
+4. **Interactive OpenAPI Documentation:**
+   Open `http://localhost:8000/docs` in your browser.

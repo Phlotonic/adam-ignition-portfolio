@@ -1,87 +1,137 @@
-import paho.mqtt.client as mqtt
-import time
-import json
-import random
+"""
+mqtt_pod_simulator.py
+
+Simulates multi-pod telemetry for the Regenerative Data Center Capstone.
+Publishes thermodynamic, hydrological, and economic metrics over Sparkplug B / JSON
+topics to Eclipse Mosquitto for ingestion by the AI Anomaly Agent and Ignition SCADA.
+"""
+
 from datetime import datetime, timezone
+import json
+import logging
+import os
+import random
+import signal
+import sys
+import time
 
-# =============================================================================
-# Triple-Bottom-Line Ecosystem Simulator
-# Generates realistic physics (HKUST-1 heat flux, fluid temps) and economics 
-# (compute yield, unsettled balances) for our immersion pods.
-# =============================================================================
+import paho.mqtt.client as mqtt
 
-BROKER = "localhost"
-PORT = 1883
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-8s] %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%SZ",
+)
+logger = logging.getLogger("pod_simulator")
+
+BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "localhost")
+BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+PUBLISH_INTERVAL = float(os.getenv("PUBLISH_INTERVAL_SEC", "5.0"))
 PODS = ["Pod_A01", "Pod_A02", "Pod_A03"]
 
-client = mqtt.Client(client_id="Ecosystem_Simulator")
+running = True
 
-def connect_mqtt():
-    while True:
+
+def handle_stop_signal(signum, frame):
+    global running
+    logger.info("Termination signal received. Shutting down simulator...")
+    running = False
+
+
+signal.signal(signal.SIGINT, handle_stop_signal)
+signal.signal(signal.SIGTERM, handle_stop_signal)
+
+
+def create_mqtt_client() -> mqtt.Client:
+    try:
+        client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            client_id="Ecosystem_Simulator",
+        )
+    except AttributeError:
+        client = mqtt.Client(client_id="Ecosystem_Simulator")
+    return client
+
+
+def main():
+    logger.info("Starting Triple-Bottom-Line Pod Simulator targeting %s:%d ...", BROKER_HOST, BROKER_PORT)
+    client = create_mqtt_client()
+
+    # Retry connection with backoff
+    connected = False
+    while running and not connected:
         try:
-            client.connect(BROKER, PORT)
-            print(f"Connected to MQTT Broker at {BROKER}:{PORT}")
-            break
-        except ConnectionRefusedError:
-            print("Broker not ready, retrying in 3s...")
+            client.connect(BROKER_HOST, BROKER_PORT, keepalive=60)
+            client.loop_start()
+            connected = True
+            logger.info("Connected to MQTT broker at %s:%d", BROKER_HOST, BROKER_PORT)
+        except Exception as e:
+            logger.warning("Broker not ready (%s). Retrying in 3s...", e)
             time.sleep(3)
 
-connect_mqtt()
+    unsettled_balances = {pod: 0.0 for pod in PODS}
 
-# Track the accumulating economic balance for each pod
-unsettled_balances = {pod: 0.0 for pod in PODS}
-
-print("Starting Triple-Bottom-Line Telemetry Simulation...")
-print("Press Ctrl+C to stop.")
-
-try:
-    while True:
+    while running:
         for pod in PODS:
-            # 1. Simulate the Physics (Thermodynamics & Hydrology)
-            # Nominal HKUST-1 heat flux is safe around 130-140 W/cm2
-            heat_flux = random.uniform(120.0, 145.0) 
-            
-            # Simulate a Critical Heat Flux (CHF) failure on Pod_A01 occasionally
-            if pod == "Pod_A01" and random.random() > 0.95:
-                heat_flux = random.uniform(165.0, 172.0) # Dry-out imminent!
-                
-            fluid_temp = random.uniform(52.0, 59.0)
-            vapor_pressure = random.uniform(101.3, 105.0)
-            
-            # The hotter the fluid, the more water the MOF-303 AWG generates
-            water = heat_flux * 0.05 
-            
-            # 2. Simulate the Economics
-            # Value of the compute (e.g., LLM training) correlates to the heat output
-            compute_yield = heat_flux * 0.8
+            # 1. Thermodynamics: Nominal HKUST-1 heat flux sits at 130–145 W/cm2
+            # Critical Heat Flux limit on copper mesh is ~170 W/cm2
+            heat_flux = random.uniform(125.0, 142.0)
+
+            # Occasionally inject an anomaly on Pod_A01 to test CHF warning/critical detection
+            if pod == "Pod_A01" and random.random() > 0.92:
+                heat_flux = random.uniform(166.0, 172.0)  # CHF breach!
+
+            fluid_temp = random.uniform(53.0, 58.5)
+            vapor_pressure = random.uniform(101.3, 104.5)
+
+            # 2. Hydrology: MOF-303 AWG water desorption yield
+            water_harvested = round(heat_flux * 0.05 + random.uniform(0.1, 0.5), 2)
+
+            # 3. Economics: Compute generation & participant payout
+            compute_yield = round(heat_flux * 0.82 + random.uniform(2.0, 8.0), 2)
             unsettled_balances[pod] += compute_yield
-            
-            # Simulate Smart Contract payout
+
+            # Payout settlement event
             distributed_profit = 0.0
-            if random.random() > 0.8: # 20% chance to settle the balance
-                distributed_profit = unsettled_balances[pod]
+            if pod != "Pod_A02" and random.random() > 0.75:
+                distributed_profit = round(unsettled_balances[pod], 2)
                 unsettled_balances[pod] = 0.0
-                
-            # Simulate an Economic SLA Breach on Pod_A02
-            # Force the balance to never settle, tripping the Anomaly Agent > $1000
-            if pod == "Pod_A02" and unsettled_balances[pod] > 1050.0:
-                distributed_profit = 0.0 # Smart contract frozen!
-                
+
+            # On Pod_A02, simulate a frozen smart contract payout leading to SLA breach (> $1000)
+            if pod == "Pod_A02" and unsettled_balances[pod] > 1100.0:
+                distributed_profit = round(unsettled_balances[pod], 2)
+                unsettled_balances[pod] = 0.0  # Reset after triggering breach
+
             payload = {
+                "node_id": pod,
+                "participant_id": f"Wallet_{pod}",
                 "heat_flux_w_cm2": round(heat_flux, 2),
                 "fluid_temp_c": round(fluid_temp, 2),
                 "vapor_pressure_kpa": round(vapor_pressure, 2),
-                "water_harvested_liters": round(water, 2),
-                "compute_yield_usd": round(compute_yield, 2),
+                "water_harvested_liters": water_harvested,
+                "compute_yield_usd": compute_yield,
+                "distributed_profit_usd": distributed_profit,
                 "unsettled_balance_usd": round(unsettled_balances[pod], 2),
-                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             }
-            
+
             topic = f"spBv1.0/DataCenter/NDATA/{pod}"
-            client.publish(topic, json.dumps(payload))
-            print(f"[{pod}] Flux: {payload['heat_flux_w_cm2']} W/cm2 | Unsettled: ${payload['unsettled_balance_usd']}")
-            
-        time.sleep(5) # Tick every 5 seconds
-except KeyboardInterrupt:
-    print("Simulation stopped.")
+            client.publish(topic, json.dumps(payload), qos=1)
+            logger.info(
+                "[%s] HeatFlux: %.1f W/cm2 | FluidTemp: %.1f°C | Water: %.1f L | Unsettled: $%.2f",
+                pod,
+                payload["heat_flux_w_cm2"],
+                payload["fluid_temp_c"],
+                payload["water_harvested_liters"],
+                payload["unsettled_balance_usd"],
+            )
+
+        time.sleep(PUBLISH_INTERVAL)
+
+    client.loop_stop()
     client.disconnect()
+    logger.info("Simulator gracefully stopped.")
+
+
+if __name__ == "__main__":
+    main()
